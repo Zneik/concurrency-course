@@ -1,29 +1,56 @@
 package course.concurrency.exams.auction;
 
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+
 public class AuctionStoppablePessimistic implements AuctionStoppable {
 
-    private Notifier notifier;
-
-    public AuctionStoppablePessimistic(Notifier notifier) {
-        this.notifier = notifier;
-    }
+    private final Lock lock;
+    private volatile boolean isStopped;
+    private final Notifier notifier;
 
     private Bid latestBid;
+    public AuctionStoppablePessimistic(Notifier notifier) {
+        this.notifier = notifier;
+        this.lock = new ReentrantLock();
+        this.isStopped = false;
+    }
 
     public boolean propose(Bid bid) {
-        if (bid.getPrice() > latestBid.getPrice()) {
-            notifier.sendOutdatedMessage(latestBid);
-            latestBid = bid;
-            return true;
+        try {
+            lock.lock();
+            if (isStopped) {
+                return false;
+            }
+            if (latestBid == null) {
+                latestBid = bid;
+                return true;
+            } else {
+                if (bid.getPrice() > latestBid.getPrice()) {
+                    Bid latestBidCopy = new Bid(latestBid.getId(),
+                            latestBid.getParticipantId(), latestBid.getPrice());
+                    notifier.sendOutdatedMessage(latestBidCopy);
+                    latestBid = bid;
+                    return true;
+                }
+            }
+            return false;
+        } finally {
+            lock.unlock();
         }
-        return false;
     }
 
     public Bid getLatestBid() {
-        return latestBid;
+        try {
+            lock.lock();
+            return latestBid;
+        } finally {
+            lock.unlock();
+        }
     }
 
     public Bid stopAuction() {
+        isStopped = true;
         return latestBid;
     }
 }
