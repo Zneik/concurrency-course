@@ -1,193 +1,195 @@
-Index: src/main/java/course/concurrency/m3_shared/immutable/OrderServiceImmutable2.java
+Index: src/main/java/course/concurrency/exams/auction/AuctionStoppablePessimisticReady.java
 IDEA additional info:
 Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
 <+>UTF-8
 ===================================================================
-diff --git a/src/main/java/course/concurrency/m3_shared/immutable/OrderServiceImmutable2.java b/src/main/java/course/concurrency/m3_shared/immutable/OrderServiceImmutable2.java
+diff --git a/src/main/java/course/concurrency/exams/auction/AuctionStoppablePessimisticReady.java b/src/main/java/course/concurrency/exams/auction/AuctionStoppablePessimisticReady.java
 new file mode 100644
---- /dev/null	(date 1665590614579)
-+++ b/src/main/java/course/concurrency/m3_shared/immutable/OrderServiceImmutable2.java	(date 1665590614579)
-@@ -0,0 +1,44 @@
-+package course.concurrency.m3_shared.immutable;
+--- /dev/null	(date 1665570250144)
++++ b/src/main/java/course/concurrency/exams/auction/AuctionStoppablePessimisticReady.java	(date 1665570250144)
+@@ -0,0 +1,42 @@
++package course.concurrency.exams.auction;
 +
-+import java.util.List;
-+import java.util.concurrent.ConcurrentHashMap;
++public class AuctionStoppablePessimisticReady implements AuctionStoppable {
 +
-+public class OrderServiceImmutable2 {
++    private final Notifier notifier;
 +
-+    // Here we don't use AtomicReference and update values inside merge function
-+    // when contention for value is low it's ok to use synchronized
-+    private final ConcurrentHashMap<Long, OrderImmutable> currentOrders = new ConcurrentHashMap<>();
++    private volatile Bid latestBid = new Bid(-1L, -1L, -1L);
++    private volatile boolean isOpen = true;
 +
-+    public long createOrder(List<Item> items) {
-+        OrderImmutable order = new OrderImmutable(items);
-+        currentOrders.put(order.getId(), order);
-+        return order.getId();
++    private final Object lock = new Object();
++
++    public AuctionStoppablePessimisticReady(Notifier notifier) {
++        this.notifier = notifier;
 +    }
 +
-+    public void updatePaymentInfo(long orderId, PaymentInfo paymentInfo) {
-+        OrderImmutable paid = currentOrders.compute(orderId, (key, o) -> o.withPaymentInfo(paymentInfo));
-+
-+        // remember that main profit of immutable variables is locality
-+        if (paid.checkStatus()) {
-+            deliver(paid);
-+        }
-+    }
-+
-+    public void setPacked(long orderId) {
-+        OrderImmutable packed = currentOrders.compute(orderId, (key, o) -> o.doPack());
-+
-+        if (packed.checkStatus()) {
-+            deliver(packed);
-+        }
-+    }
-+
-+    private void deliver(OrderImmutable order) {
-+        /* ... */
-+        currentOrders.compute(order.getId(), (key, o) -> o.withStatus(OrderImmutable.Status.DELIVERED));
-+
-+    }
-+
-+    public boolean isDelivered(long orderId) {
-+        return currentOrders.get(orderId).getStatus().equals(OrderImmutable.Status.DELIVERED);
-+    }
-+}
-Index: src/main/java/course/concurrency/m3_shared/immutable/OrderServiceImmutable.java
-IDEA additional info:
-Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
-<+>UTF-8
-===================================================================
-diff --git a/src/main/java/course/concurrency/m3_shared/immutable/OrderServiceImmutable.java b/src/main/java/course/concurrency/m3_shared/immutable/OrderServiceImmutable.java
-new file mode 100644
---- /dev/null	(date 1665590567805)
-+++ b/src/main/java/course/concurrency/m3_shared/immutable/OrderServiceImmutable.java	(date 1665590567805)
-@@ -0,0 +1,57 @@
-+package course.concurrency.m3_shared.immutable;
-+
-+import java.util.List;
-+import java.util.concurrent.ConcurrentHashMap;
-+import java.util.concurrent.atomic.AtomicReference;
-+
-+public class OrderServiceImmutable {
-+
-+    // AtomicReference is used to prevent lost updates via CAS operations
-+    private final ConcurrentHashMap<Long, AtomicReference<OrderImmutable>> currentOrders = new ConcurrentHashMap<>();
-+
-+    public long createOrder(List<Item> items) {
-+        OrderImmutable order = new OrderImmutable(items);
-+        currentOrders.put(order.getId(), new AtomicReference<>(order));
-+        return order.getId();
-+    }
-+
-+    public void updatePaymentInfo(long orderId, PaymentInfo paymentInfo) {
-+        OrderImmutable current, paid;
-+        do {
-+            current = currentOrders.get(orderId).get();
-+            paid = current.withPaymentInfo(paymentInfo);
-+        } while (!currentOrders.get(orderId).compareAndSet(current, paid));
-+
-+        // paid is a local immutable object, we can safely check its status without synchronization
-+        if (paid.checkStatus()) {
-+            deliver(paid);
-+        }
-+    }
-+
-+    // CAS update is a classic partner to immutable objects
-+    public void setPacked(long orderId) {
-+        OrderImmutable current, packed;
-+        do {
-+            current = currentOrders.get(orderId).get();
-+            packed = current.doPack();
-+        } while (!currentOrders.get(orderId).compareAndSet(current, packed));
-+
-+        if (packed.checkStatus()) {
-+            deliver(packed);
-+        }
-+    }
-+
-+    private void deliver(OrderImmutable order) {
-+        OrderImmutable current, delivered;
-+        long orderId = order.getId();
-+        do {
-+            current = currentOrders.get(orderId).get();
-+            delivered = current.withStatus(OrderImmutable.Status.DELIVERED);
-+        } while (!currentOrders.get(orderId).compareAndSet(current, delivered));
-+
-+    }
-+
-+    public boolean isDelivered(long orderId) {
-+        return currentOrders.get(orderId).get().getStatus().equals(OrderImmutable.Status.DELIVERED);
-+    }
-+}
-Index: src/main/java/course/concurrency/m3_shared/immutable/OrderImmutable.java
-IDEA additional info:
-Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
-<+>UTF-8
-===================================================================
-diff --git a/src/main/java/course/concurrency/m3_shared/immutable/OrderImmutable.java b/src/main/java/course/concurrency/m3_shared/immutable/OrderImmutable.java
-new file mode 100644
---- /dev/null	(date 1657102154270)
-+++ b/src/main/java/course/concurrency/m3_shared/immutable/OrderImmutable.java	(date 1657102154270)
-@@ -0,0 +1,61 @@
-+package course.concurrency.m3_shared.immutable;
-+
-+import java.util.List;
-+import java.util.concurrent.atomic.AtomicLong;
-+
-+public final class OrderImmutable {
-+
-+    public enum Status {NEW, IN_PROGRESS, DELIVERED}
-+
-+    private static final AtomicLong nextId = new AtomicLong();
-+
-+    private final Long id;
-+    private final List<Item> items;
-+    private final PaymentInfo paymentInfo;
-+    private final boolean isPacked;
-+    private final Status status;
-+
-+    public OrderImmutable(List<Item> items) {
-+        this(nextId.incrementAndGet(), items, null, false, Status.NEW);
-+    }
-+
-+    public Long getId() {
-+        return id;
-+    }
-+
-+    private OrderImmutable(Long id, List<Item> items, PaymentInfo paymentInfo, boolean isPacked, Status status) {
-+        this.id = id;
-+        this.items = items;
-+        this.paymentInfo = paymentInfo;
-+        this.isPacked = isPacked;
-+        this.status = status;
-+    }
-+
-+    public OrderImmutable withStatus(Status status) {
-+        return new OrderImmutable(this.id, this.items, this.paymentInfo, this.isPacked, status);
-+    }
-+
-+    public OrderImmutable withPaymentInfo(PaymentInfo paymentInfo) {
-+        return new OrderImmutable(this.id, this.items, paymentInfo, this.isPacked, this.status);
-+    }
-+
-+    public OrderImmutable doPack() {
-+        return new OrderImmutable(this.id, this.items, this.paymentInfo, true, this.status);
-+
-+    }
-+
-+    public boolean checkStatus() {
-+        if (paymentInfo != null && isPacked) {
-+            return true;
++    public boolean propose(Bid bid) {
++        // this condition filter bids with lower price and seriously reduce contention
++        if (isOpen && (bid.getPrice() > latestBid.getPrice())) {
++            synchronized (lock) {
++                if (isOpen && (bid.getPrice() > latestBid.getPrice())) {
++                    notifier.sendOutdatedMessage(latestBid);
++                    latestBid = bid;
++                    return true;
++                }
++            }
 +        }
 +        return false;
 +    }
 +
-+    public List<Item> getItems() {
-+        return items;
++    public Bid getLatestBid() {
++        return latestBid;
 +    }
 +
-+    public Status getStatus() {
-+        return status;
++    public Bid stopAuction() {
++        // these block prevents situation when synchronized block in line 19 is passed and isOpen is changed immediately
++        // actually, it can be omitted in most cases as requirements are rarely so strict
++        synchronized (lock) {
++            isOpen = false;
++            return latestBid;
++        }
 +    }
 +}
-\ No newline at end of file
+Index: src/main/java/course/concurrency/exams/auction/AuctionOptimisticReady.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/course/concurrency/exams/auction/AuctionOptimisticReady.java b/src/main/java/course/concurrency/exams/auction/AuctionOptimisticReady.java
+new file mode 100644
+--- /dev/null	(date 1665590025197)
++++ b/src/main/java/course/concurrency/exams/auction/AuctionOptimisticReady.java	(date 1665590025197)
+@@ -0,0 +1,31 @@
++package course.concurrency.exams.auction;
++
++import java.util.concurrent.atomic.AtomicReference;
++
++public class AuctionOptimisticReady implements Auction {
++    private final Notifier notifier;
++
++    private final AtomicReference<Bid> latestBid;
++    public AuctionOptimisticReady(Notifier notifier) {
++        latestBid = new AtomicReference<>(new Bid(-1l, -1l, -1l));
++        this.notifier = notifier;
++    }
++
++    public boolean propose(Bid bid) {
++        Bid currentBid;
++        do {
++            currentBid = latestBid.get();
++            if (bid.getPrice() <= currentBid.getPrice()) {
++                return false;
++            }
++        } while (!latestBid.compareAndSet(currentBid, bid));
++
++        notifier.sendOutdatedMessage(currentBid);
++
++        return true;
++    }
++
++    public Bid getLatestBid() {
++        return latestBid.get();
++    }
++}
+Index: src/main/java/course/concurrency/exams/auction/AuctionStoppableOptimisticReady.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/course/concurrency/exams/auction/AuctionStoppableOptimisticReady.java b/src/main/java/course/concurrency/exams/auction/AuctionStoppableOptimisticReady.java
+new file mode 100644
+--- /dev/null	(date 1665570825751)
++++ b/src/main/java/course/concurrency/exams/auction/AuctionStoppableOptimisticReady.java	(date 1665570825751)
+@@ -0,0 +1,45 @@
++package course.concurrency.exams.auction;
++
++import java.util.concurrent.atomic.AtomicMarkableReference;
++
++public class AuctionStoppableOptimisticReady implements AuctionStoppable {
++
++    private final AtomicMarkableReference<Bid> latestBid;
++    private final Notifier notifier;
++
++    public AuctionStoppableOptimisticReady(Notifier notifier) {
++        latestBid = new AtomicMarkableReference<>(new Bid(-1l, -1l, -1l), false);
++        this.notifier = notifier;
++    }
++
++    public boolean propose(Bid bid) {
++        Bid currentBid;
++        do {
++            if (latestBid.isMarked()) {
++                return false;
++            }
++            currentBid = latestBid.getReference();
++            if (currentBid != null && bid.getPrice() <= currentBid.getPrice()) {
++                return false;
++            }
++        } while (!latestBid.compareAndSet(currentBid, bid, false, false));
++
++        notifier.sendOutdatedMessage(currentBid);
++
++        return true;
++    }
++
++    public Bid getLatestBid() {
++        return latestBid.getReference();
++    }
++
++    public Bid stopAuction() {
++        // to prevent multiple stop actions and incorrect latestBid value
++        if (latestBid.isMarked()) {
++            return latestBid.getReference();
++        }
++        Bid latest = latestBid.getReference();
++        latestBid.set(latest, true);
++        return latest;
++    }
++}
+Index: src/main/java/course/concurrency/exams/auction/AuctionPessimisticReady.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/course/concurrency/exams/auction/AuctionPessimisticReady.java b/src/main/java/course/concurrency/exams/auction/AuctionPessimisticReady.java
+new file mode 100644
+--- /dev/null	(date 1665590025186)
++++ b/src/main/java/course/concurrency/exams/auction/AuctionPessimisticReady.java	(date 1665590025186)
+@@ -0,0 +1,37 @@
++package course.concurrency.exams.auction;
++
++public class AuctionPessimisticReady implements Auction {
++
++    private final Notifier notifier;
++
++    // volatile is used to return correct getLatestBid() result.
++    // Alternative: plain variable + synchronized getLatestBid
++    private volatile Bid latestBid = new Bid(-1L, -1L, -1L);
++
++    private final Object lock = new Object();
++
++    public AuctionPessimisticReady(Notifier notifier) {
++        this.notifier = notifier;
++    }
++
++    public boolean propose(Bid bid) {
++        // this condition filter bids with lower price and seriously reduce contention
++        if (bid.getPrice() > latestBid.getPrice()) {
++            synchronized (lock) {
++                // double-check is required to prevent data races
++                if (bid.getPrice() > latestBid.getPrice()) {
++                    notifier.sendOutdatedMessage(latestBid);
++                    latestBid = bid;
++                    return true;
++                }
++            }
++        }
++
++        return false;
++    }
++
++    public Bid getLatestBid() {
++        return latestBid;
++    }
++
++}
