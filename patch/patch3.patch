@@ -1,0 +1,94 @@
+Index: src/main/java/course/concurrency/m3_shared/collections/RestaurantServiceAdder.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/course/concurrency/m3_shared/collections/RestaurantServiceAdder.java b/src/main/java/course/concurrency/m3_shared/collections/RestaurantServiceAdder.java
+new file mode 100644
+--- /dev/null	(date 1665590421733)
++++ b/src/main/java/course/concurrency/m3_shared/collections/RestaurantServiceAdder.java	(date 1665590421733)
+@@ -0,0 +1,36 @@
++package course.concurrency.m3_shared.collections;
++
++import java.util.Map;
++import java.util.Set;
++import java.util.concurrent.ConcurrentHashMap;
++import java.util.concurrent.atomic.LongAdder;
++import java.util.stream.Collectors;
++
++public class RestaurantServiceAdder extends RestaurantService {
++
++    private final ConcurrentHashMap<String, LongAdder> stat = new ConcurrentHashMap<>();
++    private Map<String, Restaurant> restaurantMap = new ConcurrentHashMap<>() {{
++        put("A", new Restaurant("A"));
++        put("B", new Restaurant("B"));
++        put("C", new Restaurant("C"));
++    }};
++
++    public Restaurant getByName(String restaurantName) {
++        addToStat(restaurantName);
++        return restaurantMap.get(restaurantName);
++    }
++
++    public void addToStat(String restaurantName) {
++        // All synchronization happens inside LongAdder
++        // Every thread has a fixed number of steps to update value
++        // If there are more than 2 concurrent threads this approach provides better scalability
++        stat.computeIfAbsent(restaurantName, rn -> new LongAdder())
++                .increment();
++    }
++    public Set<String> printStat() {
++        return stat.entrySet().stream()
++                .map(e -> e.getKey() + " - " + e.getValue())
++                .collect(Collectors.toSet());
++    }
++
++}
+Index: src/main/java/course/concurrency/m3_shared/collections/RestaurantServiceLong.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/course/concurrency/m3_shared/collections/RestaurantServiceLong.java b/src/main/java/course/concurrency/m3_shared/collections/RestaurantServiceLong.java
+new file mode 100644
+--- /dev/null	(date 1665590421745)
++++ b/src/main/java/course/concurrency/m3_shared/collections/RestaurantServiceLong.java	(date 1665590421745)
+@@ -0,0 +1,38 @@
++package course.concurrency.m3_shared.collections;
++
++import java.util.Map;
++import java.util.Set;
++import java.util.concurrent.ConcurrentHashMap;
++import java.util.stream.Collectors;
++
++public class RestaurantServiceLong extends RestaurantService {
++
++    private final ConcurrentHashMap<String, Long> statLong = new ConcurrentHashMap<>();
++    private Map<String, Restaurant> restaurantMap = new ConcurrentHashMap<>() {{
++        put("A", new Restaurant("A"));
++        put("B", new Restaurant("B"));
++        put("C", new Restaurant("C"));
++    }};
++
++    public Restaurant getByName(String restaurantName) {
++        addToStat(restaurantName);
++        return restaurantMap.get(restaurantName);
++    }
++
++    public void addToStat(String restaurantName) {
++        // Increment happens inside synchronized block so it's possible to use plain long value
++        // In most cases workload is distributed across different keys, so it's ok to use this approach
++
++        // Synchronized block becomes a bottleneck
++        // when 2+ concurrent threads are intensely working with the same key
++        // Situation which happens in test is actually rare
++        statLong.merge(restaurantName, 1L, (k,v) -> k + 1);
++    }
++
++    public Set<String> printStat() {
++        return statLong.entrySet().stream()
++                .map(e -> e.getKey() + " - " + e.getValue())
++                .collect(Collectors.toSet());
++    }
++
++}
